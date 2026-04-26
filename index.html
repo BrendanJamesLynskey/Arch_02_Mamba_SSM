@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arch 02 — Mamba &amp; State-Space Models — Beyond Attention</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-card: #0d1117;
+            --bg-code: #161b22;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #76B900;
+            --accent-dim: #76B90044;
+            --accent-glow: #76B90033;
+            --border: #21262d;
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+            --font-body: 'Inter', sans-serif;
+            --max-width: 900px;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 17px;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .hero > * { position: relative; z-index: 1; }
+        .series-label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+        .hero h1 .accent { color: var(--accent); }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin-bottom: 2rem;
+        }
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 2.5rem;
+        }
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+            white-space: nowrap;
+        }
+        .pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+        }
+        .pipeline-step {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .pipeline-arrow { color: var(--accent); font-size: 0.9rem; font-weight: 700; }
+        .slide {
+            min-height: 100vh;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .slide-number {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 700;
+            color: var(--accent-dim);
+            position: absolute;
+            top: 2rem;
+            right: 1.5rem;
+            line-height: 1;
+            user-select: none;
+        }
+        .slide h2 {
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            line-height: 1.25;
+        }
+        .slide h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .slide p { margin-bottom: 1rem; color: var(--text-secondary); }
+        .slide p strong { color: var(--text-primary); }
+        .slide ul, .slide ol { margin-bottom: 1rem; padding-left: 1.5rem; color: var(--text-secondary); }
+        .slide li { margin-bottom: 0.4rem; }
+        .slide li strong { color: var(--text-primary); }
+        .slide code {
+            font-family: var(--font-mono);
+            font-size: 0.88em;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            padding: 0.05rem 0.35rem;
+            border-radius: 3px;
+            color: #c9d1d9;
+        }
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.25rem 0;
+            overflow: hidden;
+        }
+        .code-header {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: rgba(118, 185, 0, 0.08);
+            padding: 0.4rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .code-block pre { margin: 0; padding: 1rem; overflow-x: auto; }
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            color: #c9d1d9;
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        .kw { color: #ff7b72; }
+        .fn { color: #d2a8ff; }
+        .str { color: #a5d6ff; }
+        .cm { color: #8b949e; font-style: italic; }
+        .num { color: #79c0ff; }
+        .type { color: #ffa657; }
+        .dir { color: #ff7b72; }
+        .mac { color: #ffa657; }
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.25rem 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th {
+            background: var(--bg-code);
+            color: var(--accent);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display);
+            white-space: nowrap;
+        }
+        td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background: rgba(13, 17, 23, 0.5); }
+        .diagram-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-box {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+        }
+        .diagram-box.accent { border-color: var(--accent); color: var(--accent); background: rgba(118, 185, 0, 0.08); }
+        .diagram-box.dim { color: var(--text-secondary); border-color: var(--border); }
+        .diagram-arrow { color: var(--accent); font-size: 1.3rem; font-weight: 700; }
+        .diagram-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-vertical .diagram-arrow { font-size: 1.1rem; }
+        .hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .hierarchy-level { display: flex; align-items: center; gap: 0.75rem; }
+        .hierarchy-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+            text-align: right;
+        }
+        .hierarchy-items { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .hierarchy-item {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .hierarchy-item.accent { border-color: var(--accent); color: var(--accent); background: rgba(118, 185, 0, 0.08); }
+        .diagram-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+        .diagram-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .diagram-panel {
+            padding: 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .diagram-panel.accent-border { border-left: 3px solid var(--accent); }
+        .diagram-panel h4 {
+            font-family: var(--font-display);
+            font-size: 1rem;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+        .diagram-panel p, .diagram-panel ul { font-size: 0.85rem; }
+        .callout {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+        }
+        .callout p { margin-bottom: 0; }
+        .callout p + p { margin-top: 0.5rem; }
+        .callout .callout-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.3rem;
+        }
+        .contents-list { list-style: none; padding-left: 0; counter-reset: contents; }
+        .contents-list li {
+            counter-increment: contents;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .contents-list li:last-child { border-bottom: none; }
+        .contents-list li::before {
+            content: counter(contents, decimal-leading-zero);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 2rem;
+        }
+        .contents-list a { color: var(--text-primary); text-decoration: none; transition: color 0.2s; }
+        .contents-list a:hover { color: var(--accent); }
+        .footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+        .canvas-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.25rem 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap canvas, .canvas-wrap svg { display: block; margin: 0 auto; max-width: 100%; }
+        .badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+            margin-left: 0.3rem;
+        }
+        .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .badge.warn  { border-color: #ffa657; color: #ffa657; background: rgba(255,166,87,0.08); }
+        .badge.bad   { border-color: #ff7b72; color: #ff7b72; background: rgba(255,123,114,0.08); }
+        @media (max-width: 640px) {
+            .slide { padding: 3rem 1rem; min-height: auto; }
+            .slide-number { font-size: 3rem; top: 1.5rem; right: 1rem; }
+            .slide h2 { font-size: 1.5rem; }
+            .diagram-grid.cols-2, .diagram-grid.cols-3 { grid-template-columns: 1fr; }
+            .pipeline { gap: 0.15rem; }
+            .pipeline-step { font-size: 0.6rem; padding: 0.2rem 0.4rem; }
+            .hero h1 { font-size: 1.8rem; }
+            table { font-size: 0.78rem; }
+        }
+    </style>
+</head>
+<body>
+<header class="hero">
+    <div class="series-label">Modern Architectures Series &mdash; Presentation 02</div>
+    <h1>Mamba &amp; <span class="accent">State-Space Models</span> &mdash; Beyond Attention</h1>
+    <p class="subtitle">From HIPPO polynomial projection to Mamba's selective state-space mechanism, Mamba-2's SSD duality with linear attention, parallel scan training, RWKV, and an honest accounting of where SSMs beat and where they lose to transformers.</p>
+
+    <div class="tags">
+        <span class="tag">Mamba</span>
+        <span class="tag">SSM</span>
+        <span class="tag">S4</span>
+        <span class="tag">HIPPO</span>
+        <span class="tag">RWKV</span>
+        <span class="tag">Selective SSM</span>
+        <span class="tag">Linear Attention</span>
+    </div>
+
+    <div class="pipeline">
+        <span class="pipeline-step">HIPPO</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">S4 (diagonal)</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Mamba (selective)</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Mamba-2 (SSD)</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Hybrid</span>
+    </div>
+</header>
+
+<section class="slide" id="slide-00">
+    <div class="slide-number">00</div>
+    <h2>Topics We'll Cover</h2>
+    <ul class="contents-list">
+        <li><a href="#slide-01">Beyond Attention &mdash; Recurrence Revisited</a></li>
+        <li><a href="#slide-02">S4 Origins &mdash; Diagonal SSMs, HIPPO</a></li>
+        <li><a href="#slide-03">Mamba &mdash; Selective SSM, Input-Dependent Params</a></li>
+        <li><a href="#slide-04">Mamba-2 &mdash; SSD &amp; the Duality with Attention</a></li>
+        <li><a href="#slide-05">Hardware Reality &mdash; Fast Scan, Parallel Scan</a></li>
+        <li><a href="#slide-06">RWKV &mdash; A Parallel Project</a></li>
+        <li><a href="#slide-07">Where Mamba Beats Transformers</a></li>
+        <li><a href="#slide-08">Where It Loses &mdash; In-Context Recall, Eval Scores at Scale</a></li>
+        <li><a href="#slide-09">What to Take Away</a></li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-01">
+    <div class="slide-number">01</div>
+    <h2>Beyond Attention &mdash; Recurrence Revisited</h2>
+    <p>Transformers quadratic attention has a 12-word summary: every token attends to every other token &mdash; O(T&sup2; &middot; D) memory, O(T&sup2; &middot; D) FLOPs. For sequences of length 1M this is prohibitive. The question SSM researchers asked: <em>can we replace attention entirely with a recurrence that has O(T) inference cost and still captures long-range dependencies?</em></p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Transformer attention</h4>
+            <p><strong>O(T&sup2;)</strong> compute and memory during training. Recurrence-free &rarr; all tokens computed in parallel. Unlimited receptive field at each layer. KV cache grows linearly at inference: O(T &middot; D) per layer.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Recurrent SSM</h4>
+            <p><strong>O(T)</strong> compute at inference: one state update per step, fixed-size state. Training requires either sequential recurrence (slow) or parallel scan (fast). Receptive field theoretically infinite but empirically limited by state size.</p>
+        </div>
+    </div>
+
+    <p>The key failure of earlier RNNs (LSTM, GRU) was not recurrence itself but <strong>vanishing gradients</strong> over long sequences, and the difficulty of learning which past information to keep. The SSM line of work addresses this through structured state-space theory and, in Mamba, through <em>input-dependent</em> selectivity.</p>
+
+    <div class="callout">
+        <div class="callout-label">Framing from Gu &amp; Dao (2023)</div>
+        <p>The SSM community frames the problem around three modes of computation for a sequence model: <em>recurrent</em> (O(1) state, sequential), <em>convolutional</em> (efficient parallel training via FFT), and <em>attention</em> (full quadratic, optimal recall). S4 and Mamba trade attention-class recall for O(1) inference state. Mamba-2 proves a formal duality between SSMs and linear attention, collapsing two seemingly different research lines.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-02">
+    <div class="slide-number">02</div>
+    <h2>S4 Origins &mdash; Diagonal SSMs, HIPPO</h2>
+    <p>The <strong>Structured State Space sequence model (S4)</strong> (Gu et al., NeurIPS 2021) begins with a continuous-time linear dynamical system and discretises it for use on sequences. The state-space equations are:</p>
+
+    <div class="code-block">
+        <div class="code-header">Continuous-time SSM (HiPPO initialisation)</div>
+<pre><code><span class="cm"># Continuous form:</span>
+x'(t) = <span class="type">A</span> x(t) + <span class="type">B</span> u(t)
+y(t)  = <span class="type">C</span> x(t) + <span class="type">D</span> u(t)
+
+<span class="cm"># Discretised (zero-order hold, step size &Delta;):</span>
+<span class="type">A</span>&macr; = exp(&Delta; <span class="type">A</span>)
+<span class="type">B</span>&macr; = (&Delta; <span class="type">A</span>)<sup>-1</sup> (exp(&Delta; <span class="type">A</span>) - <span class="type">I</span>) &middot; &Delta; <span class="type">B</span>
+
+x<sub>t</sub> = <span class="type">A</span>&macr; x<sub>t-1</sub> + <span class="type">B</span>&macr; u<sub>t</sub>
+y<sub>t</sub> = <span class="type">C</span> x<sub>t</sub></code></pre>
+    </div>
+
+    <h3>HIPPO: initialising A to memorise history</h3>
+    <p>The key insight of HIPPO (High-order Polynomial Projection Operators, Gu et al. 2020) is a mathematical construction for the A matrix such that the state vector <em>x</em> maintains an optimal polynomial approximation of the input history. Concretely, HIPPO-LegS projects the input onto Legendre polynomials with a sliding-window measure. This gives S4 its long-range memory at initialisation &mdash; before any gradient descent.</p>
+
+    <div class="callout">
+        <div class="callout-label">S4 training as a convolution</div>
+        <p>Given fixed A, B, C, the SSM recurrence unrolls to a <em>convolution</em> with kernel <code>K = (C B&macr;, C A&macr; B&macr;, C A&macr;&sup2; B&macr;, ...)</code>. This can be computed in O(T log T) via FFT during training &mdash; much faster than sequential recurrence. At inference the recurrence is used directly in O(1) per step.</p>
+    </div>
+
+    <h3>From S4 to DSS to diagonal SSMs</h3>
+    <div class="diagram-flow">
+        <div class="diagram-box accent">S4 (2021)</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">S4D (2022)</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">DSS (2022)</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box accent">Mamba (2023)</div>
+    </div>
+    <p>S4 parameterises A as a diagonal-plus-low-rank (DPLR) matrix. Later work showed that purely <em>diagonal</em> A (S4D, DSS) gives comparable performance with simpler implementation. Mamba builds on this foundation.</p>
+</section>
+
+<section class="slide" id="slide-03">
+    <div class="slide-number">03</div>
+    <h2>Mamba &mdash; Selective SSM, Input-Dependent Params</h2>
+    <p>Gu &amp; Dao released <strong>Mamba</strong> in December 2023 (arXiv 2312.00752). The defining innovation: make B, C, and &Delta; <strong>functions of the input token</strong>. In S4, these are fixed matrices. In Mamba they are linear projections of the input:</p>
+
+    <div class="code-block">
+        <div class="code-header">Mamba selective SSM &mdash; input-dependent parameters</div>
+<pre><code><span class="cm"># u: input sequence (B, L, D_in)</span>
+<span class="cm"># Project to SSM dimension D_state:</span>
+B = <span class="fn">linear</span>(u)     <span class="cm"># (B, L, N) &mdash; state mixing matrix, per token</span>
+C = <span class="fn">linear</span>(u)     <span class="cm"># (B, L, N) &mdash; output mixing matrix, per token</span>
+&Delta; = <span class="fn">softplus</span>(<span class="fn">linear</span>(u))  <span class="cm"># (B, L, D) &mdash; time-step, per token and channel</span>
+
+<span class="cm"># A is fixed (diagonal, negative-real for stability)</span>
+<span class="cm"># Discretise A&macr;, B&macr; using &Delta; (same formula as S4)</span>
+A&macr; = <span class="fn">exp</span>(&Delta; <span class="kw">*</span> A)     <span class="cm"># (B, L, D, N)</span>
+B&macr; = &Delta; <span class="kw">*</span> B           <span class="cm"># simplified ZOH for diagonal A</span>
+
+<span class="cm"># Selective scan: state update</span>
+h<sub>t</sub> = A&macr;<sub>t</sub> <span class="kw">*</span> h<sub>t-1</sub> + B&macr;<sub>t</sub> <span class="kw">*</span> u<sub>t</sub>
+y<sub>t</sub> = C<sub>t</sub> &middot; h<sub>t</sub></code></pre>
+    </div>
+
+    <h3>The Mamba block architecture</h3>
+    <div class="diagram-flow">
+        <div class="diagram-box">Input x</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">Linear &times;2</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box accent">SSM (selective scan)</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">SiLU gate &times;</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">Linear out</div>
+        <span class="diagram-arrow">&rarr;</span>
+        <div class="diagram-box">+ Residual</div>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Why selectivity matters</div>
+        <p>In S4, the state update A&macr; is a fixed decay regardless of input content. Mamba's &Delta; lets the model &ldquo;reset&rdquo; the state on semantically important tokens (large &Delta; &asymp; full state replacement) and &ldquo;coast&rdquo; on irrelevant tokens (small &Delta; &asymp; pure copy). This is the mechanism that gives Mamba selective copying / associative recall, which S4 cannot do.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-04">
+    <div class="slide-number">04</div>
+    <h2>Mamba-2 &mdash; SSD &amp; the Duality with Attention</h2>
+    <p>Dao &amp; Gu (2024, arXiv 2405.21060) introduced <strong>Mamba-2</strong> with the <em>Structured State-Space Duality (SSD)</em> framework. The central theorem: a specific class of SSMs is <em>mathematically equivalent</em> to a form of <strong>linear attention with a semiseparable matrix</strong>.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>View</th><th>Formulation</th><th>Efficient mode</th></tr></thead>
+            <tbody>
+                <tr><td>SSM (recurrent)</td><td>h<sub>t</sub> = A<sub>t</sub> h<sub>t-1</sub> + B<sub>t</sub> x<sub>t</sub></td><td>O(TND) sequential</td></tr>
+                <tr><td>Linear attention</td><td>y = (L &odot; QK<sup>T</sup>) V, L lower-triangular semiseparable</td><td>O(T&sup2;N) quadratic chunk</td></tr>
+                <tr><td>Hybrid chunk scan</td><td>Process intra-chunk as matmul, inter-chunk as recurrence</td><td>O(TC&sup2; + T/C &middot; N) optimal</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>Key changes in Mamba-2 vs Mamba-1</h3>
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Multi-head structure</h4>
+            <p>Mamba-2 adopts a multi-head formulation (analogous to multi-head attention) over the SSM state: state dim N is factored as N = P &times; H where H is number of heads. This enables tensor-core-friendly matmul kernels.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Scalar A per head</h4>
+            <p>A<sub>t</sub> is reduced to a <em>scalar</em> per head per token (not a full D&times;N matrix). This simplification, which is key to the SSD duality, reduces parameters but costs little in practice: the scalar gives per-head forgetting rates.</p>
+        </div>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Practical takeaway from SSD</div>
+        <p>The duality means Mamba-2 can be trained in <em>chunk mode</em> using the same CUDA matmul kernels as flash attention, with chunks of size C=64 or C=128. Intra-chunk is a dense attention; cross-chunk is recurrent SSM. This gives near-linear scaling with a ~1.8&times; throughput improvement over Mamba-1 at the same parameter count.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-05">
+    <div class="slide-number">05</div>
+    <h2>Hardware Reality &mdash; Fast Scan, Parallel Scan</h2>
+    <p>The selective SSM recurrence is fundamentally sequential: h<sub>t</sub> depends on h<sub>t-1</sub>. Naively this means O(T) kernel launches on a GPU &mdash; catastrophic for training throughput. Two techniques unlock parallelism:</p>
+
+    <h3>Parallel prefix scan (work-efficient)</h3>
+    <p>The SSM recurrence is a <em>linear recurrence</em>: <code>h_t = a_t * h_{t-1} + b_t</code>. Linear recurrences can be solved in O(log T) depth via a parallel prefix (scan) computation, with O(T) total work &mdash; like a parallel prefix sum. On GPU this occupies all streaming multiprocessors simultaneously.</p>
+
+    <div class="code-block">
+        <div class="code-header">Blelloch parallel scan (work-efficient, O(T) work, O(log T) depth)</div>
+<pre><code><span class="cm"># Up-sweep (reduce phase): combine pairs &rarr; T/2 &rarr; T/4 &rarr; ... &rarr; 1</span>
+<span class="kw">for</span> d <span class="kw">in</span> <span class="fn">range</span>(<span class="fn">log2</span>(T)):
+    <span class="kw">for</span> k <span class="kw">in</span> <span class="fn">range</span>(<span class="num">0</span>, T, <span class="num">2</span><sup>d+1</sup>):
+        x[k + <span class="num">2</span><sup>d+1</sup> - <span class="num">1</span>] = <span class="fn">combine</span>(x[k + <span class="num">2</span><sup>d</sup> - <span class="num">1</span>], x[k + <span class="num">2</span><sup>d+1</sup> - <span class="num">1</span>])
+
+<span class="cm"># Down-sweep (distribute phase): reverse direction</span>
+<span class="kw">for</span> d <span class="kw">in</span> <span class="fn">reversed</span>(<span class="fn">range</span>(<span class="fn">log2</span>(T))):
+    <span class="kw">for</span> k <span class="kw">in</span> <span class="fn">range</span>(<span class="num">0</span>, T, <span class="num">2</span><sup>d+1</sup>):
+        x[k + <span class="num">2</span><sup>d</sup> - <span class="num">1</span>], x[k + <span class="num">2</span><sup>d+1</sup> - <span class="num">1</span>] = \
+            x[k + <span class="num">2</span><sup>d+1</sup> - <span class="num">1</span>], <span class="fn">combine</span>(...)</code></pre>
+    </div>
+
+    <h3>Hardware-aware implementation (Mamba paper Appendix B)</h3>
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Kernel fusion</h4>
+            <p>Mamba fuses the discretisation, the scan, and the output projection into a single CUDA kernel. This avoids writing O(TND) intermediate states to HBM. All intermediate values stay in SRAM (L2 cache). The fused kernel is the <code>selective_scan_cuda</code> function in the Mamba repo (<code>mamba_ssm/ops/selective_scan_interface.py</code>).</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Recomputation on backward</h4>
+            <p>Rather than storing all intermediate hidden states for the backward pass, Mamba recomputes them during backprop (similar to gradient checkpointing). This trades FLOPs for memory &mdash; acceptable because the scan FLOPs are cheap compared to attention.</p>
+        </div>
+    </div>
+</section>
+
+<section class="slide" id="slide-06">
+    <div class="slide-number">06</div>
+    <h2>RWKV &mdash; A Parallel Project</h2>
+    <p><strong>RWKV</strong> (Receptance Weighted Key Value, Peng et al. 2023, arXiv 2305.13048) arrived at a similar destination from a different direction: starting from linear attention, not state-space models. RWKV-4 and RWKV-6 are fully open-weights models up to 14B parameters, trained by the EleutherAI-adjacent RWKV foundation.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Version</th><th>Params</th><th>Key change</th></tr></thead>
+            <tbody>
+                <tr><td>RWKV-4 (2023)</td><td>up to 14B</td><td>Time-mixing + channel-mixing; additive recurrence</td></tr>
+                <tr><td>RWKV-5 Eagle (2024)</td><td>up to 7B</td><td>Multi-headed time-mix; improved long-context recall</td></tr>
+                <tr><td>RWKV-6 Finch (2024)</td><td>up to 14B</td><td>Data-dependent receptance/key; closes recall gap with Mamba</td></tr>
+                <tr><td>RWKV-7 (2025)</td><td>up to 7B</td><td>Dynamic state update; state transform generalises SSM and linear attn</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>RWKV time-mixing mechanism</h3>
+    <div class="code-block">
+        <div class="code-header">RWKV-4 time-mixing (simplified)</div>
+<pre><code><span class="cm"># w: channel-wise learned decay (negative, time-independent)</span>
+<span class="cm"># u: per-channel &ldquo;bonus&rdquo; for current token</span>
+<span class="cm"># k, v, r: key, value, receptance projections from input</span>
+
+wkv<sub>t</sub> = (<span class="fn">exp</span>(u + k<sub>t</sub>) &middot; v<sub>t</sub>  +  <span class="fn">sum</span><sub>s&lt;t</sub> <span class="fn">exp</span>((t-1-s)w + k<sub>s</sub>) &middot; v<sub>s</sub>) /
+        (<span class="fn">exp</span>(u + k<sub>t</sub>)        +  <span class="fn">sum</span><sub>s&lt;t</sub> <span class="fn">exp</span>((t-1-s)w + k<sub>s</sub>))
+
+o<sub>t</sub> = <span class="fn">sigmoid</span>(r<sub>t</sub>) &middot; <span class="fn">layer_norm</span>(wkv<sub>t</sub>)</code></pre>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">RWKV vs Mamba</div>
+        <p>RWKV's time-mixing uses a <em>fixed</em> per-channel decay w (learned but input-independent), making it analogous to S4 rather than Mamba-1. RWKV-6 introduced data-dependent w, closing the gap. The two projects converged on the same core insight independently: selectivity is required for strong recall benchmarks.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-07">
+    <div class="slide-number">07</div>
+    <h2>Where Mamba Beats Transformers</h2>
+    <p>The empirical case for SSMs is clearest in domains where O(1) inference state and linear compute matter more than per-token recall precision.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Long-sequence inference throughput</h4>
+            <p>At sequence length 1M, a 3B Mamba model processes tokens at <strong>5&times;</strong> the throughput of a 3B transformer (no KV cache growth). This makes Mamba attractive for continuous-stream applications: transcription, genome analysis, long document streaming.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Memory at inference</h4>
+            <p>Transformer KV cache grows as O(T &middot; L &middot; D &middot; 2). Mamba state is O(L &middot; D &middot; N) &mdash; <em>constant</em> in T. For a 1M-token context, this is the difference between ~16 GB KV cache and ~200 MB recurrent state.</p>
+        </div>
+    </div>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Audio &amp; genomics (dense signals)</h4>
+            <p>Mamba was applied to raw audio (8 kHz, 50k-token sequences) and DNA sequences (human genome ~3B bases). Both are long, with local structure. SSMs handle these without chunking tricks that attention requires.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Autoregressive generation latency</h4>
+            <p>Single-token generation latency for Mamba is O(1) (one state update). A transformer must compute attention over the full KV cache. At 4K+ context, Mamba is measurably faster per generated token on a single GPU.</p>
+        </div>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Jamba (AI21, March 2024)</div>
+        <p>Jamba (arXiv 2403.19887) is a 52B hybrid model alternating Mamba and attention layers in a 1:7 ratio &mdash; one attention layer per 7 Mamba layers. It fits on a single 80GB GPU at BF16 (impossible for a pure-transformer of equivalent quality) while matching Mixtral 8x7B on standard NLP benchmarks. Covered in Arch 05.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-08">
+    <div class="slide-number">08</div>
+    <h2>Where It Loses &mdash; In-Context Recall, Eval Scores at Scale</h2>
+    <p>SSMs have known, measurable failure modes. Being honest about these is as important as the wins.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>MQAR (Multi-Query Associative Recall)</h4>
+            <p>The standard synthetic benchmark for in-context copying. Input: a sequence of (key, value) pairs, then query keys. Task: retrieve the associated values. Mamba-1 underperforms transformers on MQAR at comparable model sizes. Mamba-2 and hybrid architectures close the gap substantially.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Needle-in-a-haystack</h4>
+            <p>Finding a specific fact buried in a 100K-token document. Pure Mamba models degrade noticeably beyond 32K tokens on fact retrieval tasks. Transformers with proper positional encodings (YaRN/RoPE) remain flat to 128K+. This is the core argument for hybrid architectures.</p>
+        </div>
+    </div>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Scaling laws at 7B+</h4>
+            <p>At model sizes &ge;7B and training tokens &ge;1T, transformer perplexity on standard language modelling benchmarks (The Pile, C4) is still ~5% lower than Mamba at matched FLOPs. The gap narrows with Mamba-2 and hybrid models but has not been fully closed as of Q1 2025.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>RLHF / instruction following</h4>
+            <p>Most RLHF pipelines (DPO, PPO, GRPO) have been developed for transformers. Mamba's non-differentiable state resets make reward-model fine-tuning and PPO value estimation subtler. Very little published work on post-training MoE-free Mamba models at 7B+.</p>
+        </div>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">The practical verdict (2025)</div>
+        <p>Pure-SSM models are not yet a drop-in replacement for transformers in general-purpose chat and coding. <strong>Hybrid SSM-attention</strong> (Jamba, Zamba, Zephyr-Mamba) looks more promising: attention layers handle the high-recall tasks, Mamba handles the long-range cheap computation. Arch 05 covers these hybrid designs in detail.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-09">
+    <div class="slide-number">09</div>
+    <h2>What to Take Away</h2>
+    <ul>
+        <li><strong>SSMs give O(1) inference state.</strong> Constant memory regardless of context length. KV cache growth is the transformer's Achilles heel; SSMs eliminate it entirely.</li>
+        <li><strong>HIPPO gives S4 its long-range memory.</strong> The A matrix is mathematically designed to project input history onto Legendre polynomials &mdash; no learning needed for the initialisation to preserve long-range signals.</li>
+        <li><strong>Mamba adds selectivity.</strong> B, C, &Delta; become functions of the input. Small &Delta; &rarr; state copy (remember everything). Large &Delta; &rarr; state reset (focus on now). This is what enables associative recall.</li>
+        <li><strong>Mamba-2 unifies SSMs and linear attention (SSD).</strong> Chunk-mode training uses standard matmul kernels. ~1.8&times; throughput over Mamba-1.</li>
+        <li><strong>Parallel scan makes training feasible.</strong> O(T) work, O(log T) depth, fused CUDA kernel avoids HBM round-trips.</li>
+        <li><strong>SSMs lose on in-context fact retrieval.</strong> MQAR, needle-in-haystack, and long-context QA all favour transformers. Hybrid models are the current practical synthesis.</li>
+    </ul>
+
+    <div class="callout">
+        <div class="callout-label">Where to next</div>
+        <p>Deck 03 addresses the transformer's own long-context problem: how positional encodings (RoPE, YaRN, ALiBi) and attention sparsity (sliding window, ring attention) allow transformers to reach 1M+ tokens without the architectural change that SSMs represent.</p>
+    </div>
+</section>
+
+<footer class="footer">
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Modern_Architectures">Modern Architectures Series</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Modern_Architectures">Back to Series Index</a></p>
+</footer>
+<script>
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.slide').forEach(slide => {
+        slide.style.opacity = '0';
+        slide.style.transform = 'translateY(30px)';
+        slide.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(slide);
+    });
+</script>
+</body>
+</html>
